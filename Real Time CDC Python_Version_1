@@ -1,0 +1,41 @@
+from pymongo import MongoClient
+from bson import json_util
+from datetime import datetime
+import os
+
+# MongoDB Connection
+client = MongoClient("mongodb://localhost:27017/?replicaSet=rs0")
+db = client["realtime_cdc"]
+collection = db["orders"]
+
+print("Listening for real-time CDC events...")
+
+BASE_PATH = "data_lake/orders"
+
+def get_file_path():
+    now = datetime.utcnow()
+    dir_path = f"{BASE_PATH}/year={now.year}/month={now.month:02d}/day={now.day:02d}"
+    os.makedirs(dir_path, exist_ok=True)
+
+    file_name = f"orders_cdc_{now.hour:02d}_{now.minute:02d}.json"
+    return f"{dir_path}/{file_name}"
+
+with collection.watch(full_document="updateLookup") as stream:
+    for change in stream:
+        record = {
+            "operationType": change["operationType"],
+            "documentKey": change["documentKey"],
+            "fullDocument": change.get("fullDocument"),
+            "clusterTime": change["clusterTime"],
+            "processedAt": datetime.utcnow()
+        }
+
+        file_path = get_file_path()
+
+        with open(file_path, "a") as f:
+            f.write(json_util.dumps(record) + "\n")
+
+
+        print("Current Working Directory:", os.getcwd())
+        print("CDC written to data lake:", file_path)
+        print("CDC Event captured:",record)
